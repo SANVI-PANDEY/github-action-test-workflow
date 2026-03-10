@@ -4,14 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       table_name:
-        description: 'Table to migrate (users, orders, products)'
+        description: 'Table to migrate (users or products)'
         required: true
         type: choice
         options:
           - users
-          - orders
           - products
-          - all
       environment:
         description: 'Target environment'
         required: true
@@ -20,141 +18,48 @@ on:
           - staging
           - production
       dry_run:
-        description: 'Dry run (preview only)?'
+        description: 'Dry run (no actual changes)'
         required: false
         type: boolean
         default: true
-      confirm:
-        description: 'Type CONFIRM to proceed with real migration'
-        required: false
-        type: string
-        default: ''
 
 jobs:
   migrate-data:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Safety Check
-        if: inputs.dry_run == false && inputs.confirm != 'CONFIRM'
-        run: |
-          echo "❌ ERROR: Real migration requires CONFIRM input"
-          exit 1
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       
-      - name: Install MySQL Client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mysql-client
+      - name: Install dependencies
+        run: npm install
       
-      - name: Show Migration Plan
+      - name: Run data migration (TypeScript)
+        env:
+          UAT_DB_HOST: ${{ secrets.UAT_DB_HOST }}
+          UAT_DB_USER: ${{ secrets.UAT_DB_USER }}
+          UAT_DB_PASSWORD: ${{ secrets.UAT_DB_PASSWORD }}
+          UAT_DB_NAME: ${{ secrets.UAT_DB_NAME }}
+          PROD_DB_HOST: ${{ secrets.PROD_DB_HOST }}
+          PROD_DB_USER: ${{ secrets.PROD_DB_USER }}
+          PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          PROD_DB_NAME: ${{ secrets.PROD_DB_NAME }}
+          TABLE_NAME: ${{ inputs.table_name }}
+          TARGET_ENV: ${{ inputs.environment }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          echo "================================================"
-          echo "🔄 MIGRATION PLAN"
-          echo "================================================"
-          echo "Table:       ${{ inputs.table_name }}"
-          echo "Target:      ${{ inputs.environment }}"
-          echo "Dry Run:     ${{ inputs.dry_run }}"
-          echo "Confirmed:   ${{ inputs.confirm == 'CONFIRM' }}"
-          echo "================================================"
+          echo "🚀 Running TypeScript migration script..."
+          npm run migrate:ts
       
-      - name: Export from UAT (Simulated)
-        run: |
-          echo "📤 Exporting data from UAT database..."
-          
-          if [ "${{ inputs.table_name }}" == "all" ]; then
-            echo "Exporting all tables..."
-            cp dummy-data/users.sql data_export.sql
-            cat dummy-data/orders.sql >> data_export.sql
-            cat dummy-data/products.sql >> data_export.sql
-          else
-            echo "Exporting table: ${{ inputs.table_name }}"
-            cp dummy-data/${{ inputs.table_name }}.sql data_export.sql
-          fi
-          
-          echo "✅ Export complete"
-          echo "📊 Export size: $(wc -l < data_export.sql) lines"
-      
-      - name: Preview Data
-        run: |
-          echo "================================================"
-          echo "📋 DATA PREVIEW (First 20 lines)"
-          echo "================================================"
-          head -20 data_export.sql
-          echo "..."
-          echo "================================================"
-      
-      - name: Validate Data
-        run: |
-          echo "🔍 Validating data integrity..."
-          
-          # Check file is not empty
-          if [ ! -s data_export.sql ]; then
-            echo "❌ ERROR: Export file is empty"
-            exit 1
-          fi
-          
-          # Count INSERT statements
-          insert_count=$(grep -c "INSERT INTO" data_export.sql || true)
-          echo "✅ Found $insert_count INSERT statements"
-          
-          if [ $insert_count -eq 0 ]; then
-            echo "⚠️  WARNING: No INSERT statements found"
-          fi
-      
-      - name: Import to Production (Simulated)
-        if: inputs.dry_run == false
-        run: |
-          echo "================================================"
-          echo "📥 IMPORTING TO ${{ inputs.environment }}"
-          echo "================================================"
-          
-          # In real scenario, this would be:
-          # mysql -h ${{ secrets.PROD_DB_HOST }} \
-          #   -u ${{ secrets.PROD_DB_USER }} \
-          #   -p${{ secrets.PROD_DB_PASSWORD }} \
-          #   ${{ secrets.PROD_DB_NAME }} \
-          #   < data_export.sql
-          
-          echo "🔄 Simulating import..."
-          sleep 2
-          echo "✅ Import complete!"
-          echo "📊 Rows affected: $(grep -c "INSERT INTO" data_export.sql)"
-      
-      - name: Dry Run Notice
-        if: inputs.dry_run == true
-        run: |
-          echo "================================================"
-          echo "ℹ️  DRY RUN MODE - No changes made"
-          echo "================================================"
-          echo "To perform actual migration:"
-          echo "1. Set 'Dry run' to false"
-          echo "2. Type 'CONFIRM' in the confirm field"
-          echo "3. Run the workflow again"
-          echo "================================================"
-      
-      - name: Success Summary
-        run: |
-          echo "================================================"
-          echo "✅ MIGRATION COMPLETED"
-          echo "================================================"
-          echo "Table:       ${{ inputs.table_name }}"
-          echo "Environment: ${{ inputs.environment }}"
-          echo "Status:      $([ '${{ inputs.dry_run }}' == 'true' ] && echo 'DRY RUN' || echo 'COMPLETED')"
-          echo "================================================"
-      
-      - name: Upload Export as Artifact
+      - name: Upload migration log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: data-export-${{ inputs.table_name }}-${{ github.run_number }}
-          path: data_export.sql
-          retention-days: 7
-      
-      - name: Cleanup
-        if: always()
-        run: |
-          echo "🧹 Cleaning up temporary files..."
-          rm -f data_export.sql
-          echo "✅ Cleanup complete"
+          name: migration-log-${{ inputs.table_name }}-${{ github.run_number }}
+          path: migration_log.txt
+          retention-days: 30

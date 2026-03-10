@@ -1,0 +1,24 @@
+{
+  "name": "github-action-data-migration",
+  "version": "1.0.0",
+  "description": "Data migration workflow using GitHub Actions",
+  "main": "scripts/migrate_data.js",
+  "scripts": {
+    "migrate": "ts-node scripts/migrate_data.ts",
+    "migrate:ts": "ts-node scripts/migrate_data.ts",
+    "test": "echo \"Running test migration...\" && npm run migrate"
+  },
+  "keywords": [
+    "github-actions",
+    "database",
+    "migration",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.19.37",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
