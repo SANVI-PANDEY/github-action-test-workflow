@@ -56,6 +56,27 @@ git push -u origin main
 
 ## 🔐 For Real Database Migration
 
+### Understanding GitHub Secrets Masking
+
+**Important:** GitHub automatically masks (hides with `***`) ANY value stored as a secret in workflow logs. This is a security feature.
+
+**What you'll see in logs:**
+- ✅ Secret status check (SET ✓ or NOT SET ✗)
+- ✅ String lengths (e.g., "Host length: 15 chars")
+- ✅ Last 4 characters (e.g., "********db01")
+- ❌ Full secret values (masked as `***`)
+
+**Example log output:**
+```
+Configuration Check:
+   Host: ********db01 ✓ (15 chars)
+   User: ****user ✓ (10 chars)
+   Database: ****prod ✓ (12 chars)
+   Password: ***SET*** ✓
+```
+
+This is **intentional** - it prevents credentials from leaking in logs!
+
 ### Add GitHub Secrets
 
 Go to **Settings → Secrets and variables → Actions** and add:

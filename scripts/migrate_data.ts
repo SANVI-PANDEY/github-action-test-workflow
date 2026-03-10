@@ -37,18 +37,34 @@ function logHeader(title: string): void {
     logMessage('='.repeat(70));
 }
 
+// Helper to partially show sensitive values (shows last 4 chars)
+function partialShow(value: string | undefined, label: string): string {
+    if (!value || value.length === 0) return `${label}: NOT SET`;
+    if (value.length <= 4) return `${label}: ***`;
+    const visible = value.slice(-4);
+    const masked = '*'.repeat(Math.min(value.length - 4, 8));
+    return `${label}: ${masked}${visible}`;
+}
+
 // Simulate database connection
 async function simulateDbConnection(envPrefix: string): Promise<boolean> {
     const host = process.env[`${envPrefix}_DB_HOST`] || 'localhost';
     const user = process.env[`${envPrefix}_DB_USER`] || 'dummy_user';
     const dbName = process.env[`${envPrefix}_DB_NAME`] || 'dummy_db';
-    const passwordSet = process.env[`${envPrefix}_DB_PASSWORD`] ? '***SET***' : 'NOT SET';
+    const password = process.env[`${envPrefix}_DB_PASSWORD`];
     
     logMessage(`🔌 Connecting to ${envPrefix} database...`);
-    logMessage(`   └─ Host: ${host}`);
-    logMessage(`   └─ User: ${user}`);
-    logMessage(`   └─ Database: ${dbName}`);
-    logMessage(`   └─ Password: ${passwordSet}`);
+    
+    // Show config with partial masking to verify values are set
+    logMessage(`   Configuration Check:`);
+    logMessage(`   ${partialShow(host, 'Host')}`);
+    logMessage(`   ${partialShow(user, 'User')}`);
+    logMessage(`   ${partialShow(dbName, 'Database')}`);
+    logMessage(`   Password: ${password ? '***SET***' : 'NOT SET'}`);
+    
+    logMessage(`   ✓ Host length: ${host.length} chars`);
+    logMessage(`   ✓ User length: ${user.length} chars`);
+    logMessage(`   ✓ DB name length: ${dbName.length} chars`);
     
     // Simulate connection delay
     await new Promise(resolve => setTimeout(resolve, 500));
