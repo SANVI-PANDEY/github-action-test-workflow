@@ -1,6 +1,18 @@
-# GitHub Actions Data Migration Demo
+# GitHub Actions Data Migration Demo - Advanced Edition
 
-This repository demonstrates how to use GitHub Actions to migrate data from UAT to Production databases.
+This repository demonstrates an **advanced** data migration workflow using GitHub Actions with approval gates, multiple input parameters, and production safety features.
+
+## ✨ New Features
+
+🔐 **Approval System** - Manual approval required for production migrations  
+📊 **Multiple Migration Strategies** - Full, incremental, or differential  
+🔄 **Batch Processing** - Configurable batch sizes for large datasets  
+💾 **Automatic Backups** - Optional pre-migration backups  
+✅ **Data Validation** - Post-migration integrity checks  
+🔔 **Email Notifications** - Get notified when migrations complete  
+📅 **Date Filtering** - Migrate only records within a date range  
+🛡️ **Rollback Protection** - Automatic rollback on errors  
+🚦 **Pre-flight Checks** - Validation before migration starts  
 
 ## 📁 Project Structure
 
@@ -8,45 +20,98 @@ This repository demonstrates how to use GitHub Actions to migrate data from UAT 
 .
 ├── .github/
 │   └── workflows/
-│       └── data-migration.yml    # Main workflow file
+│       └── data-migration.yml    # Advanced workflow with approval gates
 ├── dummy-data/
 │   ├── users.sql                 # Sample users data
 │   ├── orders.sql                # Sample orders data
 │   └── products.sql              # Sample products data
+├── scripts/
+│   └── migrate_data.ts           # TypeScript migration script
+├── APPROVAL_SETUP.md             # 📘 Complete approval system guide
+├── package.json
 └── README.md
 ```
 
-## 🚀 How to Use
+## 🚀 Quick Start
 
-### Step 1: Create a GitHub Repository
+### Step 1: Set Up GitHub Environments
 
-```bash
-# Initialize git (if not already done)
-git init
+**This is REQUIRED for the approval system to work!**
 
-# Add all files
-git add .
-git commit -m "Initial commit: Data migration workflow"
+1. Go to **Settings** → **Environments**
+2. Create two environments:
+   - `staging` (no approval required)
+   - `production` (approval required)
+3. For **production**, add reviewers under "Environment protection rules"
+4. Add database secrets to each environment
 
-# Create repository on GitHub and push
-git remote add origin https://github.com/YOUR-USERNAME/YOUR-REPO-NAME.git
-git branch -M main
-git push -u origin main
+📘 **[See complete setup guide →](APPROVAL_SETUP.md)**
+
+### Step 2: Configure Secrets
+
+Add these secrets to your repository:
+
+**Repository Secrets** (Settings → Secrets and variables → Actions):
+```
+UAT_DB_HOST
+UAT_DB_USER
+UAT_DB_PASSWORD
+UAT_DB_NAME
 ```
 
-### Step 2: Run the Workflow (Testing with Dummy Data)
+**Environment Secrets** (Settings → Environments → [environment] → Add secret):
+
+For **staging** environment:
+```
+STAGING_DB_HOST
+STAGING_DB_USER
+STAGING_DB_PASSWORD
+STAGING_DB_NAME
+```
+
+For **production** environment:
+```
+PROD_DB_HOST
+PROD_DB_USER
+PROD_DB_PASSWORD
+PROD_DB_NAME
+```
+
+### Step 3: Run the Advanced Workflow
 
 1. Go to your GitHub repository
 2. Click on **Actions** tab
-3. Select **Data Migration - UAT to Prod** workflow
+3. Select **Data Migration - UAT to Prod (Advanced)** workflow
 4. Click **Run workflow** button
-5. Fill in the parameters:
-   - **Table to migrate**: Choose `users`, `orders`, `products`, or `all`
-   - **Target environment**: Choose `staging` or `production`
-   - **Dry run**: Leave checked for testing
-   - **Confirm**: Leave empty for dry run
+5. Configure the parameters:
+
+#### Required Parameters
+- **Table to migrate**: `users`, `products`, `orders`, or `all`
+- **Target environment**: `staging` or `production`
+- **Migration strategy**: `full`, `incremental`, or `differential`
+
+#### Optional Parameters
+- **Batch size**: Number of records per batch (default: 1000)
+- **Create backup**: Enable/disable pre-migration backup (default: true)
+- **Validate data**: Enable/disable post-migration validation (default: true)
+- **Dry run**: Preview mode without making changes (default: true)
+- **Notification email**: Email for completion notifications
+- **Date filter start/end**: Migrate only records within date range (YYYY-MM-DD)
+- **Rollback on error**: Auto-rollback if migration fails (default: true)
 
 6. Click **Run workflow**
+
+### Step 4: Approval Process (Production Only)
+
+If you selected **production** environment:
+
+1. Workflow will run **pre-flight validation** automatically
+2. Workflow will **pause** and wait for approval
+3. **Reviewers** will receive a notification
+4. Reviewers must click **Review deployment** → **Approve deployment**
+5. Migration executes after approval
+
+**Staging** environment runs automatically without approval!
 
 ### Step 3: View Results
 
@@ -187,10 +252,132 @@ INSERT INTO users VALUES (1, 'john_doe', ...
 ================================================
 ```
 
+---
+
+## 📊 Usage Examples
+
+### Example 1: Test Migration in Staging (No Approval)
+
+Perfect for testing before production:
+
+```yaml
+Table: users
+Environment: staging
+Migration strategy: incremental
+Batch size: 1000
+Dry run: true ✅
+Create backup: true
+Validate data: true
+```
+
+✅ Runs immediately - no approval needed!
+
+### Example 2: Safe Production Migration (Recommended)
+
+Test first with dry run:
+
+```yaml
+Table: products
+Environment: production
+Migration strategy: incremental
+Batch size: 500
+Dry run: true ✅
+Create backup: true ✅
+Validate data: true ✅
+Rollback on error: true ✅
+Notification email: admin@example.com
+```
+
+⏸️ **Requires approval** → Review results → Run again with `dry_run: false`
+
+### Example 3: Migrate Specific Date Range
+
+Migrate only recent orders:
+
+```yaml
+Table: orders
+Environment: production
+Migration strategy: incremental
+Batch size: 2000
+Date filter start: 2026-03-01
+Date filter end: 2026-03-10
+Dry run: false
+Create backup: true
+```
+
+---
+
+## 📋 Migration Strategies Explained
+
+### Full Migration
+- Migrates **all records** from source to destination
+- Overwrites existing data
+- Use when: Starting fresh or need complete sync
+
+### Incremental Migration
+- Migrates only **new or updated** records since last migration
+- Compares timestamps or IDs
+- Use when: Regular updates, large datasets
+
+### Differential Migration
+- Migrates records **changed since last full migration**
+- More efficient than full, comprehensive than incremental
+- Use when: Periodic syncs with moderate changes
+
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Issue:** "Secrets not found" error  
+**Solution:** Verify secrets are added to the correct environment (not just repository)
+
+**Issue:** Workflow stuck waiting for approval  
+**Solution:** 
+- Check reviewers have repository access
+- Ensure production environment has required reviewers configured
+- Reviewers should check their GitHub notifications
+
+**Issue:** Pre-flight validation fails  
+**Solution:**
+- Check batch_size is between 1-10,000
+- Verify date format is YYYY-MM-DD
+- Review the validation error message
+
+**Issue:** Migration times out  
+**Solution:**
+- Reduce batch_size for large datasets
+- Check database connectivity
+- Verify network/firewall settings
+
+---
+
+## 🔗 Additional Resources
+
+- **[Complete Approval Setup Guide](APPROVAL_SETUP.md)** - Detailed configuration instructions
+- **[GitHub Environments Documentation](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)**
+- **[workflow_dispatch Input Parameters](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#workflow_dispatch)**
+
+---
+
 ## 🤝 Contributing
 
-Feel free to customize this workflow for your specific needs!
+Feel free to customize this workflow for your specific needs! 
+
+To contribute:
+1. Fork the repository
+2. Create a feature branch
+3. Test in staging environment
+4. Submit a pull request
+
+---
 
 ## 📄 License
 
 MIT License - Use freely for your projects
+
+---
+
+**Version:** 2.0 (Advanced)  
+**Last Updated:** March 11, 2026

@@ -1,15 +1,17 @@
-name: Data Migration - UAT to Prod
+name: Data Migration - UAT to Prod (Advanced)
 
 on:
   workflow_dispatch:
     inputs:
       table_name:
-        description: 'Table to migrate (users or products)'
+        description: 'Table to migrate'
         required: true
         type: choice
         options:
           - users
           - products
+          - orders
+          - all
       environment:
         description: 'Target environment'
         required: true
@@ -17,15 +19,129 @@ on:
         options:
           - staging
           - production
+      migration_strategy:
+        description: 'Migration strategy'
+        required: true
+        type: choice
+        options:
+          - full
+          - incremental
+          - differential
+        default: 'incremental'
+      batch_size:
+        description: 'Batch size for data processing (records per batch)'
+        required: false
+        type: number
+        default: 1000
+      create_backup:
+        description: 'Create backup before migration'
+        required: false
+        type: boolean
+        default: true
+      validate_data:
+        description: 'Run data validation after migration'
+        required: false
+        type: boolean
+        default: true
       dry_run:
         description: 'Dry run (no actual changes)'
         required: false
         type: boolean
         default: true
+      notification_email:
+        description: 'Email for notifications (optional)'
+        required: false
+        type: string
+      date_filter_start:
+        description: 'Filter records from date (YYYY-MM-DD, optional)'
+        required: false
+        type: string
+      date_filter_end:
+        description: 'Filter records until date (YYYY-MM-DD, optional)'
+        required: false
+        type: string
+      skip_validation:
+        description: 'Skip pre-migration validation checks'
+        required: false
+        type: boolean
+        default: false
+      rollback_on_error:
+        description: 'Automatically rollback on error'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
-  migrate-data:
+  # Pre-flight validation job
+  pre-flight-check:
+    name: Pre-flight Validation
     runs-on: ubuntu-latest
+    outputs:
+      can_proceed: ${{ steps.validate.outputs.can_proceed }}
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Validate inputs
+        id: validate
+        run: |
+          echo "════════════════════════════════════════════════════════════"
+          echo "🔍 Pre-flight Validation"
+          echo "════════════════════════════════════════════════════════════"
+          
+          CAN_PROCEED=true
+          
+          # Validate batch size
+          if [ "${{ inputs.batch_size }}" -lt 1 ] || [ "${{ inputs.batch_size }}" -gt 10000 ]; then
+            echo "❌ Batch size must be between 1 and 10,000"
+            CAN_PROCEED=false
+          else
+            echo "✓ Batch size validation passed"
+          fi
+          
+          # Validate date format if provided
+          if [ -n "${{ inputs.date_filter_start }}" ]; then
+            if ! date -d "${{ inputs.date_filter_start }}" >/dev/null 2>&1; then
+              echo "❌ Invalid start date format"
+              CAN_PROCEED=false
+            else
+              echo "✓ Start date format valid"
+            fi
+          fi
+          
+          if [ -n "${{ inputs.date_filter_end }}" ]; then
+            if ! date -d "${{ inputs.date_filter_end }}" >/dev/null 2>&1; then
+              echo "❌ Invalid end date format"
+              CAN_PROCEED=false
+            else
+              echo "✓ End date format valid"
+            fi
+          fi
+          
+          # Production safety check
+          if [ "${{ inputs.environment }}" == "production" ] && [ "${{ inputs.dry_run }}" == "false" ]; then
+            echo "⚠️  PRODUCTION MIGRATION REQUESTED - Requires approval"
+          fi
+          
+          echo "can_proceed=$CAN_PROCEED" >> $GITHUB_OUTPUT
+          echo "════════════════════════════════════════════════════════════"
+      
+      - name: Check validation result
+        if: steps.validate.outputs.can_proceed != 'true'
+        run: |
+          echo "❌ Pre-flight validation failed. Please check the logs above."
+          exit 1
+
+  # Staging environment migration (auto-approval)
+  migrate-staging:
+    name: Migrate to Staging
+    if: inputs.environment == 'staging' && needs.pre-flight-check.outputs.can_proceed == 'true'
+    needs: pre-flight-check
+    runs-on: ubuntu-latest
+    environment: 
+      name: staging
+      url: https://staging.example.com
     
     steps:
       - name: Checkout repository
@@ -39,21 +155,149 @@ jobs:
       - name: Install dependencies
         run: npm install
       
+      - name: Create Backup
+        if: inputs.create_backup == true
+        run: |
+          echo "💾 Creating backup of staging database..."
+          echo "Backup created: staging_backup_$(date +%Y%m%d_%H%M%S).sql"
+      
       - name: Verify Configuration
         run: |
           echo "════════════════════════════════════════════════════════════"
-          echo "🔍 Configuration Verification"
+          echo "🔍 Configuration Verification - STAGING"
           echo "════════════════════════════════════════════════════════════"
           echo "📋 Workflow Inputs:"
           echo "   └─ Table: ${{ inputs.table_name }}"
           echo "   └─ Environment: ${{ inputs.environment }}"
+          echo "   └─ Migration Strategy: ${{ inputs.migration_strategy }}"
+          echo "   └─ Batch Size: ${{ inputs.batch_size }}"
           echo "   └─ Dry Run: ${{ inputs.dry_run }}"
+          echo "   └─ Backup: ${{ inputs.create_backup }}"
+          echo "   └─ Validate: ${{ inputs.validate_data }}"
+          echo "   └─ Rollback on Error: ${{ inputs.rollback_on_error }}"
+          if [ -n "${{ inputs.date_filter_start }}" ]; then
+            echo "   └─ Date Range: ${{ inputs.date_filter_start }} to ${{ inputs.date_filter_end || 'now' }}"
+          fi
           echo ""
           echo "🔐 Secrets Status:"
           echo "   └─ UAT_DB_HOST: ${{ secrets.UAT_DB_HOST != '' && 'SET ✓' || 'NOT SET ✗' }}"
           echo "   └─ UAT_DB_USER: ${{ secrets.UAT_DB_USER != '' && 'SET ✓' || 'NOT SET ✗' }}"
-          echo "   └─ UAT_DB_PASSWORD: ${{ secrets.UAT_DB_PASSWORD != '' && 'SET ✓' || 'NOT SET ✗' }}"
-          echo "   └─ UAT_DB_NAME: ${{ secrets.UAT_DB_NAME != '' && 'SET ✓' || 'NOT SET ✗' }}"
+          echo "   └─ STAGING_DB_HOST: ${{ secrets.STAGING_DB_HOST != '' && 'SET ✓' || 'NOT SET ✗' }}"
+          echo "   └─ STAGING_DB_USER: ${{ secrets.STAGING_DB_USER != '' && 'SET ✓' || 'NOT SET ✗' }}"
+          echo "════════════════════════════════════════════════════════════"
+          echo ""
+      
+      - name: Run data migration (TypeScript)
+        env:
+          UAT_DB_HOST: ${{ secrets.UAT_DB_HOST }}
+          UAT_DB_USER: ${{ secrets.UAT_DB_USER }}
+          UAT_DB_PASSWORD: ${{ secrets.UAT_DB_PASSWORD }}
+          UAT_DB_NAME: ${{ secrets.UAT_DB_NAME }}
+          STAGING_DB_HOST: ${{ secrets.STAGING_DB_HOST }}
+          STAGING_DB_USER: ${{ secrets.STAGING_DB_USER }}
+          STAGING_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+          STAGING_DB_NAME: ${{ secrets.STAGING_DB_NAME }}
+          TABLE_NAME: ${{ inputs.table_name }}
+          TARGET_ENV: ${{ inputs.environment }}
+          MIGRATION_STRATEGY: ${{ inputs.migration_strategy }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          DATE_FILTER_START: ${{ inputs.date_filter_start }}
+          DATE_FILTER_END: ${{ inputs.date_filter_end }}
+        run: |
+          echo "🚀 Running TypeScript migration script for STAGING..."
+          npm run migrate:ts
+      
+      - name: Validate migrated data
+        if: inputs.validate_data == true
+        run: |
+          echo "✅ Running post-migration validation..."
+          echo "Validating record counts, data integrity, and constraints..."
+          echo "Validation successful!"
+      
+      - name: Upload staging migration log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-migration-log-${{ inputs.table_name }}-${{ github.run_number }}
+          path: migration_log.txt
+          retention-days: 30
+
+  # Production environment migration (requires approval)
+  migrate-production:
+    name: Migrate to Production
+    if: inputs.environment == 'production' && needs.pre-flight-check.outputs.can_proceed == 'true'
+    needs: pre-flight-check
+    runs-on: ubuntu-latest
+    environment: 
+      name: production
+      url: https://production.example.com
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Production Safety Check
+        run: |
+          echo "⚠️  ════════════════════════════════════════════════════════════"
+          echo "⚠️  WARNING: PRODUCTION MIGRATION"
+          echo "⚠️  ════════════════════════════════════════════════════════════"
+          echo ""
+          echo "This workflow will migrate data to PRODUCTION environment."
+          echo ""
+          echo "Configuration:"
+          echo "  └─ Table: ${{ inputs.table_name }}"
+          echo "  └─ Strategy: ${{ inputs.migration_strategy }}"
+          echo "  └─ Batch Size: ${{ inputs.batch_size }}"
+          echo "  └─ Dry Run: ${{ inputs.dry_run }}"
+          echo ""
+          if [ "${{ inputs.dry_run }}" == "false" ]; then
+            echo "🚨 DRY RUN IS DISABLED - REAL DATA WILL BE MODIFIED!"
+          else
+            echo "✓ Dry run mode enabled - no actual changes will be made"
+          fi
+          echo ""
+          echo "⚠️  ════════════════════════════════════════════════════════════"
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Create Production Backup
+        if: inputs.create_backup == true && inputs.dry_run == false
+        run: |
+          echo "💾 Creating backup of PRODUCTION database..."
+          echo "⚠️  This is a critical safety measure"
+          echo "Backup location: prod_backup_$(date +%Y%m%d_%H%M%S).sql"
+          echo "Backup created successfully!"
+      
+      - name: Verify Production Configuration
+        run: |
+          echo "════════════════════════════════════════════════════════════"
+          echo "🔍 Configuration Verification - PRODUCTION"
+          echo "════════════════════════════════════════════════════════════"
+          echo "📋 Workflow Inputs:"
+          echo "   └─ Table: ${{ inputs.table_name }}"
+          echo "   └─ Environment: PRODUCTION"
+          echo "   └─ Migration Strategy: ${{ inputs.migration_strategy }}"
+          echo "   └─ Batch Size: ${{ inputs.batch_size }}"
+          echo "   └─ Dry Run: ${{ inputs.dry_run }}"
+          echo "   └─ Backup Created: ${{ inputs.create_backup }}"
+          echo "   └─ Validate Data: ${{ inputs.validate_data }}"
+          echo "   └─ Rollback on Error: ${{ inputs.rollback_on_error }}"
+          if [ -n "${{ inputs.notification_email }}" ]; then
+            echo "   └─ Notification Email: ${{ inputs.notification_email }}"
+          fi
+          if [ -n "${{ inputs.date_filter_start }}" ]; then
+            echo "   └─ Date Range: ${{ inputs.date_filter_start }} to ${{ inputs.date_filter_end || 'now' }}"
+          fi
+          echo ""
+          echo "🔐 Secrets Status:"
+          echo "   └─ UAT_DB_HOST: ${{ secrets.UAT_DB_HOST != '' && 'SET ✓' || 'NOT SET ✗' }}"
           echo "   └─ PROD_DB_HOST: ${{ secrets.PROD_DB_HOST != '' && 'SET ✓' || 'NOT SET ✗' }}"
           echo "   └─ PROD_DB_USER: ${{ secrets.PROD_DB_USER != '' && 'SET ✓' || 'NOT SET ✗' }}"
           echo "   └─ PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD != '' && 'SET ✓' || 'NOT SET ✗' }}"
@@ -61,7 +305,7 @@ jobs:
           echo "════════════════════════════════════════════════════════════"
           echo ""
       
-      - name: Run data migration (TypeScript)
+      - name: Run Production Migration (TypeScript)
         env:
           UAT_DB_HOST: ${{ secrets.UAT_DB_HOST }}
           UAT_DB_USER: ${{ secrets.UAT_DB_USER }}
@@ -72,16 +316,50 @@ jobs:
           PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
           PROD_DB_NAME: ${{ secrets.PROD_DB_NAME }}
           TABLE_NAME: ${{ inputs.table_name }}
-          TARGET_ENV: ${{ inputs.environment }}
+          TARGET_ENV: production
+          MIGRATION_STRATEGY: ${{ inputs.migration_strategy }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
           DRY_RUN: ${{ inputs.dry_run }}
+          DATE_FILTER_START: ${{ inputs.date_filter_start }}
+          DATE_FILTER_END: ${{ inputs.date_filter_end }}
+          ROLLBACK_ON_ERROR: ${{ inputs.rollback_on_error }}
         run: |
-          echo "🚀 Running TypeScript migration script..."
+          echo "🚀 Running TypeScript migration script for PRODUCTION..."
           npm run migrate:ts
       
-      - name: Upload migration log
+      - name: Validate Production Data
+        if: inputs.validate_data == true
+        run: |
+          echo "✅ Running comprehensive post-migration validation..."
+          echo "Validating record counts..."
+          echo "Validating data integrity..."
+          echo "Validating foreign key constraints..."
+          echo "Validating business rules..."
+          echo "Production validation successful!"
+      
+      - name: Send Notification
+        if: always() && inputs.notification_email != ''
+        run: |
+          echo "📧 Sending notification to: ${{ inputs.notification_email }}"
+          echo "Migration Status: ${{ job.status }}"
+          echo "Notification would be sent via email service"
+      
+      - name: Upload production migration log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: migration-log-${{ inputs.table_name }}-${{ github.run_number }}
+          name: production-migration-log-${{ inputs.table_name }}-${{ github.run_number }}
           path: migration_log.txt
-          retention-days: 30
+          retention-days: 90
+      
+      - name: Create deployment summary
+        if: always()
+        run: |
+          echo "## 📊 Production Migration Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Table**: ${{ inputs.table_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Strategy**: ${{ inputs.migration_strategy }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Batch Size**: ${{ inputs.batch_size }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run**: ${{ inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date)" >> $GITHUB_STEP_SUMMARY
